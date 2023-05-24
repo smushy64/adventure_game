@@ -38,10 +38,7 @@ public class GameManager : MonoBehaviour {
         screen_width    = Screen.width;
         screen_height   = Screen.height;
 
-        const int MIN_RESOLUTION = 1;
-
-        render_resolution_x = Mathf.Max((int)((float)screen_width  * render_resolution_scale), MIN_RESOLUTION);
-        render_resolution_y = Mathf.Max((int)((float)screen_height * render_resolution_scale), MIN_RESOLUTION);
+        recalculate_render_resolution();
 
         fullscreen_mode = Screen.fullScreenMode;
 
@@ -58,6 +55,24 @@ public class GameManager : MonoBehaviour {
 
     void Update() {
         this.update_input_state();
+    }
+
+    void recalculate_render_resolution() {
+        const int MIN_RESOLUTION = 1;
+
+        render_resolution_x = Mathf.Max((int)((float)screen_width  * render_resolution_scale), MIN_RESOLUTION);
+        render_resolution_y = Mathf.Max((int)((float)screen_height * render_resolution_scale), MIN_RESOLUTION);
+    }
+
+    public void set_screen_size( int width, int height ) {
+        screen_width  = width;
+        screen_height = height;
+        recalculate_render_resolution();
+
+        Screen.SetResolution( width, height, fullscreen_mode );
+        if( on_screen_resize != null ) {
+            on_screen_resize.Invoke( render_resolution_x, render_resolution_y );
+        }
     }
 
     public void cursor_lock() {

@@ -15,3 +15,16 @@ static public class Utilities {
     }
 
 };
+
+static public class MathfEx {
+
+    static public float remap(
+        float in_min, float in_max,
+        float out_min, float out_max,
+        float v
+    ) {
+        float t = Mathf.InverseLerp( in_min, in_max, v );
+        return Mathf.Lerp( out_min, out_max, t );
+    }
+
+};

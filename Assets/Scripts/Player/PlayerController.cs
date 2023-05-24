@@ -59,6 +59,9 @@ public class PlayerController : MonoBehaviour {
     float raycastInsetPercentage = 0.8f;
     [SerializeField]
     float maxAerialVelocity = 500f;
+    // NOTE(alicia): I can't think of a better name rn oops
+    [SerializeField, Range(0f, 0.999999f)]
+    float maxSlopeDot = 0.5f;
 
     #if UNITY_EDITOR
 
@@ -66,7 +69,6 @@ public class PlayerController : MonoBehaviour {
 
         [SerializeField]
         bool drawGroundCheck = false;
-
     #endif
 
     float collider_radius;
@@ -146,11 +148,32 @@ public class PlayerController : MonoBehaviour {
         is_grounded = ground_check();
         r3d.useGravity = !is_grounded;
 
-        if( !is_grounded ) {
-            // if( r3d.velocity.y < 0f && !is_holding_jump ) {
+        if( is_grounded ) {
+
+            float movement_sqr_mag = movement.sqrMagnitude;
+            if( movement_sqr_mag > 0f ) {
+                Vector3 movement_direction = movement / Mathf.Sqrt( movement_sqr_mag );
+                if(Physics.Raycast(
+                    transform.position,
+                    movement_direction,
+                    out RaycastHit hit_info,
+                    collider_radius,
+                    groundCheckLayer
+                )) {
+                    float movement_dot_surface_normal = Mathf.Abs(Vector3.Dot( movement_direction, hit_info.normal ));
+                    if( movement_dot_surface_normal >= maxSlopeDot ) {
+                        float remaped_dot = MathfEx.remap( maxSlopeDot, 1.0f, 0.0f, 1.5f, movement_dot_surface_normal );
+                        movement -= remaped_dot * movement;
+                    }
+                }
+            }
+
+        } else {
+
             if( r3d.velocity.y < 0f || !is_holding_jump ) {
                 r3d.AddForce( Vector3.down * extraGravity );
             }
+
         }
 
         r3d.AddForce( movement );
@@ -158,10 +181,13 @@ public class PlayerController : MonoBehaviour {
         float velocity = r3d.velocity.magnitude;
         const float MIN_VELOCITY = float.Epsilon;
         is_moving = velocity > MIN_VELOCITY;
+
         if( velocity >= max_velocity ) {
+
+            const float CLAMP_THRESHOLD = 0.1f;
             // if the difference is less than a threshold,
             // just clamp down to max velocity
-            if( velocity - max_velocity < 0.1f ) {
+            if( velocity - max_velocity < CLAMP_THRESHOLD ) {
                 r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, max_velocity );
             } else {
                 // instead of just clamping all the way down to max ground velocity
@@ -245,6 +271,16 @@ public class PlayerController : MonoBehaviour {
             if( drawGroundCheck ) {
                 draw_ground_check();
             }
+
+            Gizmos.color = Color.blue;
+
+            Vector3 line_position = transform.position;
+
+            Gizmos.DrawLine(
+                line_position,
+                line_position + movement.normalized
+            );
+
         }
 
         void draw_ground_check() {
