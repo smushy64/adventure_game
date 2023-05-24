@@ -16,8 +16,8 @@ public class PlayerController : MonoBehaviour {
     public bool is_grounded  { get; private set; }
     public bool is_sprinting { get; private set; }
 
-    public Action OnTouchGround;
-    public Action OnLeaveGround;
+    public Action on_touch_ground;
+    public Action on_leave_ground;
 
     [Header("Movement")]
 
@@ -60,6 +60,15 @@ public class PlayerController : MonoBehaviour {
     [SerializeField]
     float maxAerialVelocity = 500f;
 
+    #if UNITY_EDITOR
+
+        [Header("Debug Only")]
+
+        [SerializeField]
+        bool drawGroundCheck = false;
+
+    #endif
+
     float collider_radius;
 
     float camera_pitch;
@@ -75,10 +84,10 @@ public class PlayerController : MonoBehaviour {
     Vector3 movement;
 
     void OnEnable() {
-        OnTouchGround += on_touch_ground;
+        on_touch_ground += reset_max_ground_velocity;
     }
     void OnDisable() {
-        OnTouchGround -= on_touch_ground;
+        on_touch_ground -= reset_max_ground_velocity;
     }
 
     void Awake() {
@@ -135,9 +144,11 @@ public class PlayerController : MonoBehaviour {
 
     void FixedUpdate() {
         is_grounded = ground_check();
+        r3d.useGravity = !is_grounded;
 
         if( !is_grounded ) {
-            if( r3d.velocity.y < 0f && !is_holding_jump ) {
+            // if( r3d.velocity.y < 0f && !is_holding_jump ) {
+            if( r3d.velocity.y < 0f || !is_holding_jump ) {
                 r3d.AddForce( Vector3.down * extraGravity );
             }
         }
@@ -148,15 +159,23 @@ public class PlayerController : MonoBehaviour {
         const float MIN_VELOCITY = float.Epsilon;
         is_moving = velocity > MIN_VELOCITY;
         if( velocity >= max_velocity ) {
-            r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, max_velocity );
+            // if the difference is less than a threshold,
+            // just clamp down to max velocity
+            if( velocity - max_velocity < 0.1f ) {
+                r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, max_velocity );
+            } else {
+                // instead of just clamping all the way down to max ground velocity
+                // clamp to halfway between max and the current velocity so
+                // the effect of the velocity suddenly dropping isn't as jarring
+                float mid_point = Mathf.Lerp( max_velocity, velocity, 0.5f );
+                r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, mid_point );
+            }
         }
 
         r3d.drag = is_trying_to_move ? 0f : (is_grounded ? stopDrag : 0f);
 
         transform.rotation        = Quaternion.AngleAxis( camera_yaw, Vector3.up );
         cameraPivot.localRotation = Quaternion.AngleAxis( camera_pitch, Vector3.right );
-
-        r3d.useGravity = !is_grounded;
 
     }
 
@@ -199,9 +218,9 @@ public class PlayerController : MonoBehaviour {
 
         if( result != is_grounded ) {
             if( result ) {
-                Utilities.safe_invoke( OnTouchGround );
+                Utilities.safe_invoke( on_touch_ground );
             } else {
-                Utilities.safe_invoke( OnLeaveGround );
+                Utilities.safe_invoke( on_leave_ground );
             }
         }
 
@@ -216,42 +235,49 @@ public class PlayerController : MonoBehaviour {
         return is_grounded;
     }
 
-    void on_touch_ground() {
+    void reset_max_ground_velocity() {
         max_velocity = is_trying_to_sprint ? maxGroundedSprintVelocity : maxGroundedWalkVelocity;
     }
 
-    void OnDrawGizmosSelected() {
-    }
+    #if UNITY_EDITOR
 
-    void draw_ground_check() {
-        Vector3 position = transform.position + (Vector3.up * groundCheckVerticalOffset);
+        void OnDrawGizmosSelected() {
+            if( drawGroundCheck ) {
+                draw_ground_check();
+            }
+        }
 
-        Gizmos.color = is_grounded ? Color.green : Color.red;
+        void draw_ground_check() {
+            Vector3 position = transform.position + (Vector3.up * groundCheckVerticalOffset);
 
-        Gizmos.DrawLine(
-            position,
-            position + (Vector3.down * maxGroundCheckDistance)
-        );
+            Gizmos.color = is_grounded ? Color.green : Color.red;
 
-        Gizmos.DrawLine(
-            (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)),
-            (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
-        );
+            Gizmos.DrawLine(
+                position,
+                position + (Vector3.down * maxGroundCheckDistance)
+            );
 
-        Gizmos.DrawLine(
-            (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)),
-            (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
-        );
+            Gizmos.DrawLine(
+                (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)),
+                (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+            );
 
-        Gizmos.DrawLine(
-            (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)),
-            (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
-        );
+            Gizmos.DrawLine(
+                (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)),
+                (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+            );
 
-        Gizmos.DrawLine(
-            (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)),
-            (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
-        );
-    }
+            Gizmos.DrawLine(
+                (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)),
+                (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+            );
+
+            Gizmos.DrawLine(
+                (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)),
+                (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+            );
+        }
+
+    #endif
 
 }
