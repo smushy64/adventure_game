@@ -34,6 +34,15 @@ public class PlayerController : MonoBehaviour {
     [SerializeField]
     float stopDrag = 100f;
 
+    [SerializeField, Min(0f)]
+    float maxStairHeight = 1f;
+    [SerializeField, Min(0f)]
+    float stairJumpHeight = 1f;
+
+    // NOTE(alicia): I can't think of a better name rn oops
+    [SerializeField, Range(0f, 0.999999f)]
+    float maxSlopeDot = 0.5f;
+
     [Header("Camera")]
 
     [SerializeField]
@@ -59,9 +68,6 @@ public class PlayerController : MonoBehaviour {
     float raycastInsetPercentage = 0.8f;
     [SerializeField]
     float maxAerialVelocity = 500f;
-    // NOTE(alicia): I can't think of a better name rn oops
-    [SerializeField, Range(0f, 0.999999f)]
-    float maxSlopeDot = 0.5f;
 
     #if UNITY_EDITOR
 
@@ -69,6 +75,11 @@ public class PlayerController : MonoBehaviour {
 
         [SerializeField]
         bool drawGroundCheck = false;
+        [SerializeField]
+        bool drawSlopeRaycast = false;
+        [SerializeField]
+        bool drawStairRaycast = false;
+
     #endif
 
     float collider_radius;
@@ -145,27 +156,13 @@ public class PlayerController : MonoBehaviour {
     }
 
     void FixedUpdate() {
-        is_grounded = ground_check();
-        r3d.useGravity = !is_grounded;
 
         if( is_grounded ) {
 
             float movement_sqr_mag = movement.sqrMagnitude;
             if( movement_sqr_mag > 0f ) {
                 Vector3 movement_direction = movement / Mathf.Sqrt( movement_sqr_mag );
-                if(Physics.Raycast(
-                    transform.position,
-                    movement_direction,
-                    out RaycastHit hit_info,
-                    collider_radius,
-                    groundCheckLayer
-                )) {
-                    float movement_dot_surface_normal = Mathf.Abs(Vector3.Dot( movement_direction, hit_info.normal ));
-                    if( movement_dot_surface_normal >= maxSlopeDot ) {
-                        float remaped_dot = MathfEx.remap( maxSlopeDot, 1.0f, 0.0f, 1.5f, movement_dot_surface_normal );
-                        movement -= remaped_dot * movement;
-                    }
-                }
+                handle_slopes_and_stairs( movement_direction );
             }
 
         } else {
@@ -175,10 +172,14 @@ public class PlayerController : MonoBehaviour {
             }
 
         }
+        is_grounded = ground_check();
+        r3d.useGravity = !is_grounded;
 
         r3d.AddForce( movement );
 
-        float velocity = r3d.velocity.magnitude;
+        Vector2 lateral_velocity_vector = new Vector2( r3d.velocity.x, r3d.velocity.z );
+        float velocity = lateral_velocity_vector.magnitude;
+
         const float MIN_VELOCITY = float.Epsilon;
         is_moving = velocity > MIN_VELOCITY;
 
@@ -188,21 +189,66 @@ public class PlayerController : MonoBehaviour {
             // if the difference is less than a threshold,
             // just clamp down to max velocity
             if( velocity - max_velocity < CLAMP_THRESHOLD ) {
-                r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, max_velocity );
+                lateral_velocity_vector = Vector2.ClampMagnitude( lateral_velocity_vector, max_velocity );
             } else {
                 // instead of just clamping all the way down to max ground velocity
                 // clamp to halfway between max and the current velocity so
                 // the effect of the velocity suddenly dropping isn't as jarring
                 float mid_point = Mathf.Lerp( max_velocity, velocity, 0.5f );
-                r3d.velocity = Vector3.ClampMagnitude( r3d.velocity, mid_point );
+                lateral_velocity_vector = Vector2.ClampMagnitude( lateral_velocity_vector, mid_point );
             }
+
         }
+
+        r3d.velocity = new Vector3( lateral_velocity_vector.x, r3d.velocity.y, lateral_velocity_vector.y );
 
         r3d.drag = is_trying_to_move ? 0f : (is_grounded ? stopDrag : 0f);
 
         transform.rotation        = Quaternion.AngleAxis( camera_yaw, Vector3.up );
         cameraPivot.localRotation = Quaternion.AngleAxis( camera_pitch, Vector3.right );
 
+    }
+
+    bool stair_check_lower = false;
+    bool stair_check_upper = false;
+
+    void handle_slopes_and_stairs( Vector3 movement_direction ) {
+        
+        // stairs
+        stair_check_lower = false;
+        stair_check_upper = false;
+
+        float stair_check_length = 1.2f;
+
+        Vector3 raycast_start_position = transform.position + (movement_direction * 0.25f);
+
+        if(Physics.Raycast(
+            raycast_start_position,
+            movement_direction,
+            out RaycastHit hit_info,
+            stair_check_length,
+            groundCheckLayer
+        )) {
+            stair_check_lower = true;
+            if( !Physics.Raycast(
+                raycast_start_position + (Vector3.up * maxStairHeight),
+                movement_direction,
+                stair_check_length + 0.1f,
+                groundCheckLayer
+            )) {
+                stair_check_upper = true;
+                movement += new Vector3( 0f, stairJumpHeight, 0f );
+                is_grounded = true;
+                return;
+            }
+
+            float movement_dot_surface_normal = Mathf.Abs( Vector3.Dot( movement_direction, hit_info.normal ) );
+            if( movement_dot_surface_normal >= maxSlopeDot ) {
+                float remaped_dot = MathfEx.remap( maxSlopeDot, 1.0f, 0.0f, 1.0f, movement_dot_surface_normal );
+                movement -= remaped_dot * movement;
+            }
+
+        }
     }
 
     bool ground_check() {
@@ -216,25 +262,25 @@ public class PlayerController : MonoBehaviour {
             groundCheckLayer
         );
         bool hit_left = Physics.Raycast(
-            position + ((Vector3.left * collider_radius) * raycastInsetPercentage),
+            position + ((-transform.right * collider_radius) * raycastInsetPercentage),
             Vector3.down,
             maxGroundCheckDistance,
             groundCheckLayer
         );
         bool hit_right = Physics.Raycast(
-            position + ((Vector3.right * collider_radius) * raycastInsetPercentage),
+            position + ((transform.right * collider_radius) * raycastInsetPercentage),
             Vector3.down,
             maxGroundCheckDistance,
             groundCheckLayer
         );
         bool hit_forward = Physics.Raycast(
-            position + ((Vector3.forward * collider_radius) * raycastInsetPercentage),
+            position + ((transform.forward * collider_radius) * raycastInsetPercentage),
             Vector3.down,
             maxGroundCheckDistance,
             groundCheckLayer
         );
         bool hit_back = Physics.Raycast(
-            position + ((Vector3.back * collider_radius) * raycastInsetPercentage),
+            position + ((-transform.forward * collider_radius) * raycastInsetPercentage),
             Vector3.down,
             maxGroundCheckDistance,
             groundCheckLayer
@@ -272,6 +318,32 @@ public class PlayerController : MonoBehaviour {
                 draw_ground_check();
             }
 
+            if( drawSlopeRaycast ) {
+                draw_slope_raycast();
+            }
+
+            if( drawStairRaycast ) {
+                draw_stair_raycast();
+            }
+
+        }
+
+        void draw_stair_raycast() {
+            Gizmos.color = stair_check_lower ? Color.red : Color.green;
+            Gizmos.DrawLine(
+                transform.position,
+                transform.position + movement.normalized
+            );
+
+            Gizmos.color = stair_check_upper ? Color.red : Color.green;
+            Vector3 stair_check_position = transform.position + (Vector3.up * maxStairHeight);
+            Gizmos.DrawLine(
+                stair_check_position,
+                stair_check_position + movement.normalized
+            );
+        }
+
+        void draw_slope_raycast() {
             Gizmos.color = Color.blue;
 
             Vector3 line_position = transform.position;
@@ -280,10 +352,14 @@ public class PlayerController : MonoBehaviour {
                 line_position,
                 line_position + movement.normalized
             );
-
         }
 
         void draw_ground_check() {
+            if( capsule_collider == null ) {
+                capsule_collider = GetComponent<CapsuleCollider>();
+                collider_radius = capsule_collider.radius;
+            }
+
             Vector3 position = transform.position + (Vector3.up * groundCheckVerticalOffset);
 
             Gizmos.color = is_grounded ? Color.green : Color.red;
@@ -294,23 +370,23 @@ public class PlayerController : MonoBehaviour {
             );
 
             Gizmos.DrawLine(
-                (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)),
-                (position + ((Vector3.forward * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+                (position + ((transform.forward * collider_radius) * raycastInsetPercentage)),
+                (position + ((transform.forward * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
             );
 
             Gizmos.DrawLine(
-                (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)),
-                (position + ((Vector3.back * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+                (position + ((-transform.forward * collider_radius) * raycastInsetPercentage)),
+                (position + ((-transform.forward * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
             );
 
             Gizmos.DrawLine(
-                (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)),
-                (position + ((Vector3.right * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+                (position + ((transform.right * collider_radius) * raycastInsetPercentage)),
+                (position + ((transform.right * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
             );
 
             Gizmos.DrawLine(
-                (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)),
-                (position + ((Vector3.left * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
+                (position + ((-transform.right * collider_radius) * raycastInsetPercentage)),
+                (position + ((-transform.right * collider_radius) * raycastInsetPercentage)) + (Vector3.down * maxGroundCheckDistance)
             );
         }
 
